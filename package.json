@@ -1,0 +1,42 @@
+{
+  "name": "landmarked",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A full-stack scaffold for a premium travel journaling platform: 3D interactive globe (CesiumJS), one-click travel markers, trip journals, a scrapbook-style photo album, social features (follows/likes/comments), weather + currency widgets, and expense tracking.",
+  "main": "index.js",
+  "scripts": {
+    "client": "npm --prefix client run dev",
+    "server": "npm --prefix server run dev",
+    "dev": "concurrently -n SERVER,CLIENT -c green,cyan \"npm run server\" \"npm run client\"",
+
+    "build": "npm --prefix client run build",
+    "preview": "npm --prefix client run preview",
+    "preview-all": "concurrently -n SERVER,CLIENT -c green,cyan \"npm run server\" \"npm run preview\"",
+
+    "install-all": "npm install && npm --prefix server install && npm --prefix client install",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/saumyapandey31/Landmarked.git"
+  },
+  "keywords": [
+    "travel",
+    "mern",
+    "react",
+    "vite",
+    "express",
+    "mysql",
+    "cesium",
+    "travel-journal"
+  ],
+  "author": "Saumya Pandey",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/saumyapandey31/Landmarked/issues"
+  },
+  "homepage": "https://github.com/saumyapandey31/Landmarked#readme",
+  "devDependencies": {
+    "concurrently": "^10.0.3"
+  }
+}
