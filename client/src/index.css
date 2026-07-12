@@ -1,0 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Editorial light theme: warm white/beige background, deep green accents. */
+  --c-bg-primary: 250 249 247;
+  --c-bg-secondary: 242 239 230;
+  --c-accent-primary: 15 61 46;
+  --c-accent-secondary: 45 106 79;
+  --c-accent-highlight: 62 143 104;
+  --c-card: 255 255 255;
+  --c-ink: 27 27 27;
+  --c-muted: 107 114 128;
+  --c-line: 229 231 235;
+}
+
+[data-theme='dark'] {
+  --c-bg-primary: 16 20 18;
+  --c-bg-secondary: 21 26 23;
+  --c-accent-primary: 74 163 124;
+  --c-accent-secondary: 92 184 140;
+  --c-accent-highlight: 110 201 156;
+  --c-card: 26 32 29;
+  --c-ink: 237 237 234;
+  --c-muted: 156 163 175;
+  --c-line: 47 55 51;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-bg-primary text-ink font-body;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+h1, h2, h3, h4 {
+  @apply font-display;
+}
+
+::selection {
+  background-color: #A8C3A0aa;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(15, 61, 46, 0.15);
+  border-radius: 999px;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+/* Light glassmorphism — used on the navbar and any panel that floats
+   over background imagery (hero card, quote card). */
+.glass {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(15, 61, 46, 0.08);
+}
+
+/* Dark glass — reserved for surfaces that sit on top of photography
+   (sidebar over an image, hero overlays), where light glass would
+   disappear. */
+.glass-dark {
+  background: rgba(11, 46, 34, 0.55);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 40px -10px rgba(15, 61, 46, 0.18); }
+  50% { box-shadow: 0 0 60px -5px rgba(15, 61, 46, 0.3); }
+}
+
+.globe-frame {
+  animation: pulse-glow 4s ease-in-out infinite;
+}
+
+.book-page {
+  transform-style: preserve-3d;
+  transition: transform 0.8s cubic-bezier(0.65, 0, 0.35, 1);
+  transform-origin: left center;
+}
+
+.book-page.flipped {
+  transform: rotateY(-180deg);
+}
+
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, rgba(15,61,46,0.05) 0%, rgba(15,61,46,0.1) 50%, rgba(15,61,46,0.05) 100%);
+  background-size: 800px 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+@keyframes float-y {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.float {
+  animation: float-y 5s ease-in-out infinite;
+}

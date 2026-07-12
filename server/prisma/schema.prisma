@@ -1,0 +1,438 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum MarkerType {
+  VISITED
+  WANT_TO_VISIT
+  CURRENTLY_TRAVELLING
+  BUCKET_LIST
+}
+
+enum Privacy {
+  PUBLIC
+  FRIENDS_ONLY
+  PRIVATE
+}
+
+model User {
+  id            Int       @id @default(autoincrement())
+  name          String
+  username      String?   @unique
+  email         String    @unique
+  password      String?
+  googleId      String?   @unique
+  avatarUrl     String?
+  coverUrl      String?
+  bio           String?   @db.Text
+  country       String?
+  travelPreferences String? @db.Text
+  homeCurrency  String    @default("USD")
+  profileVisibility Privacy @default(PUBLIC)
+  // Bumped on "logout from all devices" — every previously-issued JWT is
+  // checked against this on each authenticated request, so old tokens stop
+  // working immediately instead of only expiring naturally.
+  tokenVersion  Int       @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  trips           Trip[]
+  markers         TravelMarker[]
+  comments        Comment[]
+  likes           Like[]
+  bookmarks       Bookmark[]
+  notifications   Notification[]        @relation("notificationRecipient")
+  triggeredNotifs Notification[]        @relation("notificationActor")
+  achievements    UserAchievement[]
+  following       Follower[]            @relation("followingRelation")
+  followers       Follower[]            @relation("followerRelation")
+  settings        UserSettings?
+  activityLogs    ActivityLog[]
+  scrapbookEntries ScrapbookEntry[]
+  bucketListItems  BucketListItem[]
+  sessions         Session[]
+
+  @@map("users")
+}
+
+model Trip {
+  id            Int       @id @default(autoincrement())
+  userId        Int
+  title         String
+  countryId     Int?
+  cityId        Int?
+  state         String?
+  latitude      Float
+  longitude     Float
+  startDate     DateTime
+  endDate       DateTime?
+  travelType    String?
+  transportation String?
+  companions    String?
+  story         String?   @db.Text
+  notes         String?   @db.Text
+  rating        Int?
+  budget        Float?
+  privacy       Privacy   @default(PUBLIC)
+  coverImageUrl String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  country   Country?      @relation(fields: [countryId], references: [id])
+  city      City?         @relation(fields: [cityId], references: [id])
+  media     TripMedia[]
+  videos    TripVideo[]
+  expenses  TripExpense[]
+  stories   Story[]
+  tags      TripTag[]
+  comments  Comment[]
+  likes     Like[]
+  bookmarks Bookmark[]
+
+  @@map("trips")
+}
+
+model TripMedia {
+  id        Int      @id @default(autoincrement())
+  tripId    Int
+  url       String
+  caption   String?
+  isCover   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@map("trip_media")
+}
+
+model TripVideo {
+  id        Int      @id @default(autoincrement())
+  tripId    Int
+  url       String
+  caption   String?
+  createdAt DateTime @default(now())
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@map("trip_videos")
+}
+
+model ExpenseCategory {
+  id       Int           @id @default(autoincrement())
+  name     String        @unique
+  expenses TripExpense[]
+
+  @@map("expense_categories")
+}
+
+model TripExpense {
+  id         Int      @id @default(autoincrement())
+  tripId     Int
+  categoryId Int
+  amount     Float
+  currency   String   @default("USD")
+  note       String?
+  spentAt    DateTime @default(now())
+
+  trip     Trip            @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  category ExpenseCategory @relation(fields: [categoryId], references: [id])
+
+  @@map("trip_expenses")
+}
+
+model Country {
+  id      Int      @id @default(autoincrement())
+  name    String   @unique
+  isoCode String?  @unique
+  cities  City[]
+  trips   Trip[]
+  markers TravelMarker[]
+
+  @@map("countries")
+}
+
+model City {
+  id        Int      @id @default(autoincrement())
+  name      String
+  countryId Int
+  latitude  Float?
+  longitude Float?
+
+  country Country @relation(fields: [countryId], references: [id])
+  trips   Trip[]
+  markers TravelMarker[]
+
+  @@map("cities")
+}
+
+model TravelMarker {
+  id        Int        @id @default(autoincrement())
+  userId    Int
+  type      MarkerType
+  label     String?
+  latitude  Float
+  longitude Float
+  countryId Int?
+  cityId    Int?
+  createdAt DateTime   @default(now())
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  country Country? @relation(fields: [countryId], references: [id])
+  city    City?    @relation(fields: [cityId], references: [id])
+
+  @@map("travel_markers")
+}
+
+model Story {
+  id        Int      @id @default(autoincrement())
+  tripId    Int
+  heading   String?
+  body      String?  @db.Text
+  createdAt DateTime @default(now())
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@map("stories")
+}
+
+model Comment {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  tripId    Int
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@map("comments")
+}
+
+model Like {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  tripId    Int
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tripId])
+  @@map("likes")
+}
+
+model Follower {
+  id          Int      @id @default(autoincrement())
+  followerId  Int
+  followingId Int
+  createdAt   DateTime @default(now())
+
+  follower  User @relation("followerRelation", fields: [followerId], references: [id], onDelete: Cascade)
+  following User @relation("followingRelation", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@map("followers")
+}
+
+model Bookmark {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  tripId    Int
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tripId])
+  @@map("bookmarks")
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  actorId   Int?
+  type      String
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user  User  @relation("notificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actor User? @relation("notificationActor", fields: [actorId], references: [id])
+
+  @@map("notifications")
+}
+
+model Achievement {
+  id          Int    @id @default(autoincrement())
+  code        String @unique
+  title       String
+  description String?
+  icon        String?
+
+  users UserAchievement[]
+
+  @@map("achievements")
+}
+
+model UserAchievement {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  achievementId Int
+  earnedAt      DateTime @default(now())
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@map("user_achievements")
+}
+
+model Currency {
+  id       Int    @id @default(autoincrement())
+  code     String @unique
+  name     String
+  symbol   String?
+
+  @@map("currencies")
+}
+
+model WeatherLog {
+  id          Int      @id @default(autoincrement())
+  cityName    String
+  temperature Float?
+  condition   String?
+  fetchedAt   DateTime @default(now())
+
+  @@map("weather_logs")
+}
+
+model Tag {
+  id   Int    @id @default(autoincrement())
+  name String @unique
+
+  trips TripTag[]
+
+  @@map("tags")
+}
+
+model TripTag {
+  tripId Int
+  tagId  Int
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([tripId, tagId])
+  @@map("trip_tags")
+}
+
+model UserSettings {
+  id                 Int     @id @default(autoincrement())
+  userId             Int     @unique
+  emailNotifications Boolean @default(true)
+  pushNotifications  Boolean @default(true)
+  journalReminders   Boolean @default(true)
+  travelReminders    Boolean @default(true)
+  marketingEmails    Boolean @default(false)
+  theme              String  @default("system")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+// One row per successful login — powers the Settings → Security tab
+// ("Last login", "Active sessions", "Login devices") with real data
+// instead of placeholders.
+model Session {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  userAgent    String?
+  ipAddress    String?
+  createdAt    DateTime @default(now())
+  lastActiveAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model ActivityLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  action    String
+  metadata  String?  @db.Text
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("activity_logs")
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model ScrapbookEntry {
+  id         Int       @id @default(autoincrement())
+  userId     Int
+  title      String
+  caption    String?   @db.Text
+  location   String?
+  country    String?
+  city       String?
+  travelDate DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  images ScrapbookImage[]
+
+  @@index([userId])
+  @@map("scrapbook_entries")
+}
+
+model ScrapbookImage {
+  id        Int      @id @default(autoincrement())
+  entryId   Int
+  url       String
+  caption   String?
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  entry ScrapbookEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([entryId])
+  @@map("scrapbook_images")
+}
+
+model BucketListItem {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  destination     String
+  country         String?
+  continent       String?
+  notes           String?  @db.Text
+  priority        Priority @default(MEDIUM)
+  estimatedBudget Float?
+  bestSeason      String?
+  travelType      String?
+  isCompleted     Boolean  @default(false)
+  isArchived      Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("bucket_list_items")
+}
