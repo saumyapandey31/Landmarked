@@ -24,26 +24,34 @@ const app = express();
 /* ===========================
    CORS Configuration
 =========================== */
+
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:4173",
   process.env.CLIENT_URL,
 ].filter(Boolean);
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin) return callback(null, true);
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no Origin (Postman, curl, server-to-server)
+    if (!origin) return callback(null, true);
 
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
 
-      return callback(new Error("Not allowed by CORS"));
-    },
-    credentials: true,
-  })
-);
+    console.log("Blocked Origin:", origin);
+    console.log("Allowed Origins:", allowedOrigins);
+
+    return callback(new Error("Not allowed by CORS"));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 /* ===========================
    Middleware
@@ -62,7 +70,10 @@ app.get("/", (req, res) => {
 });
 
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok" });
+  res.json({
+    status: "ok",
+    message: "Landmarked API is running",
+  });
 });
 
 /* ===========================
@@ -85,6 +96,17 @@ app.use("/api/scrapbook", scrapbookRoutes);
 app.use("/api/bucket-list", bucketListRoutes);
 
 /* ===========================
+   404 Handler
+=========================== */
+
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "Route not found",
+  });
+});
+
+/* ===========================
    Error Handler
 =========================== */
 
@@ -93,7 +115,7 @@ app.use((err, req, res, next) => {
 
   res.status(err.status || 500).json({
     success: false,
-    message: err.message || "Server Error",
+    message: err.message || "Internal Server Error",
   });
 });
 
@@ -105,4 +127,5 @@ const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
   console.log(`🚀 Landmarked API running at http://localhost:${PORT}`);
+  console.log("Allowed Origins:", allowedOrigins);
 });
