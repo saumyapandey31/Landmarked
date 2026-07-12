@@ -24,16 +24,15 @@ const app = express();
 /* ===========================
    CORS Configuration
 =========================== */
-
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:4173",
-];
+  process.env.CLIENT_URL,
+].filter(Boolean);
 
 app.use(
   cors({
-    origin: function (origin, callback) {
-      // Allow Postman, curl, etc.
+    origin(origin, callback) {
       if (!origin) return callback(null, true);
 
       if (allowedOrigins.includes(origin)) {
