@@ -1,25 +1,71 @@
+// src/services/uploads.js
+
 import api from './api';
 
+/**
+ * Upload a single image
+ */
 export async function uploadImage(file, onProgress) {
-  const form = new FormData();
-  form.append('image', file);
-  const res = await api.post('/uploads/image', form, {
-    headers: { 'Content-Type': 'multipart/form-data' },
+  const formData = new FormData();
+  formData.append('image', file);
+
+  const { data } = await api.post('/uploads/image', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
     onUploadProgress: onProgress
-      ? (evt) => onProgress(Math.round((evt.loaded / evt.total) * 100))
+      ? (event) => {
+          if (!event.total) return;
+          onProgress(Math.round((event.loaded * 100) / event.total));
+        }
       : undefined,
   });
-  return res.data; // { url, publicId }
+
+  console.log('Single Upload Response:', data);
+
+  return {
+    url: data.url || data.secure_url,
+    publicId: data.publicId || data.public_id,
+    caption: '',
+  };
 }
 
+/**
+ * Upload multiple images
+ */
 export async function uploadImages(files, onProgress) {
-  const form = new FormData();
-  Array.from(files).forEach((file) => form.append('images', file));
-  const res = await api.post('/uploads/images', form, {
-    headers: { 'Content-Type': 'multipart/form-data' },
+  if (!files || files.length === 0) return [];
+
+  const formData = new FormData();
+
+  Array.from(files).forEach((file) => {
+    formData.append('images', file);
+  });
+
+  const { data } = await api.post('/uploads/images', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
     onUploadProgress: onProgress
-      ? (evt) => onProgress(Math.round((evt.loaded / evt.total) * 100))
+      ? (event) => {
+          if (!event.total) return;
+          onProgress(Math.round((event.loaded * 100) / event.total));
+        }
       : undefined,
   });
-  return res.data.images; // [{ url, publicId }]
+
+  console.log('Multiple Upload Response:', data);
+
+  // Accept different backend response formats
+  const uploadedImages =
+    data.images ||
+    data.files ||
+    data.data ||
+    [];
+
+  return uploadedImages.map((img) => ({
+    url: img.url || img.secure_url,
+    publicId: img.publicId || img.public_id,
+    caption: img.caption || '',
+  }));
 }
