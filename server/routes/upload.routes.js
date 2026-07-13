@@ -1,28 +1,84 @@
-const express = require('express');
-const { protect } = require('../middleware/auth');
-const upload = require('../middleware/upload');
+const express = require("express");
+const { protect } = require("../middleware/auth");
+const upload = require("../middleware/upload");
+const { uploadBuffer } = require("../services/cloudinary");
 
 const router = express.Router();
 
-// Single image (trip cover, avatar, etc.)
-router.post('/image', protect, upload.single('image'), (req, res) => {
-  if (!req.file) return res.status(400).json({ message: 'No image uploaded' });
-  res.status(201).json({ url: req.file.path, publicId: req.file.filename });
-});
+/**
+ * Upload single image
+ */
+router.post(
+  "/image",
+  protect,
+  upload.single("image"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          message: "No image uploaded",
+        });
+      }
 
-// Multiple images at once (scrapbook entries)
-router.post('/images', protect, upload.array('images', 10), (req, res) => {
-  if (!req.files?.length) return res.status(400).json({ message: 'No images uploaded' });
-  res.status(201).json({
-    images: req.files.map((f) => ({ url: f.path, publicId: f.filename })),
-  });
-});
+      const result = await uploadBuffer(
+        req.file.buffer,
+        "landmarked/images"
+      );
 
-// Multer errors (file too large, bad type, etc.) land in Express's default
-// handler as regular thrown errors — surface them as 400s instead of 500s.
-router.use((err, req, res, next) => {
-  if (err) return res.status(400).json({ message: err.message || 'Upload failed' });
-  next();
-});
+      return res.status(201).json({
+        url: result.secure_url,
+        publicId: result.public_id,
+      });
+    } catch (err) {
+      console.error(err);
+
+      return res.status(500).json({
+        message: "Image upload failed",
+      });
+    }
+  }
+);
+
+/**
+ * Upload multiple images
+ */
+router.post(
+  "/images",
+  protect,
+  upload.array("images", 10),
+  async (req, res) => {
+    try {
+      if (!req.files || req.files.length === 0) {
+        return res.status(400).json({
+          message: "No images uploaded",
+        });
+      }
+
+      const uploaded = await Promise.all(
+        req.files.map(async (file) => {
+          const result = await uploadBuffer(
+            file.buffer,
+            "landmarked/scrapbook"
+          );
+
+          return {
+            url: result.secure_url,
+            publicId: result.public_id,
+          };
+        })
+      );
+
+      return res.status(201).json({
+        images: uploaded,
+      });
+    } catch (err) {
+      console.error(err);
+
+      return res.status(500).json({
+        message: "Image upload failed",
+      });
+    }
+  }
+);
 
 module.exports = router;

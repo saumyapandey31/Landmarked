@@ -8,11 +8,9 @@
     "client": "npm --prefix client run dev",
     "server": "npm --prefix server run dev",
     "dev": "concurrently -n SERVER,CLIENT -c green,cyan \"npm run server\" \"npm run client\"",
-
     "build": "npm --prefix client run build",
     "preview": "npm --prefix client run preview",
     "preview-all": "concurrently -n SERVER,CLIENT -c green,cyan \"npm run server\" \"npm run preview\"",
-
     "install-all": "npm install && npm --prefix server install && npm --prefix client install",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -38,5 +36,8 @@
   "homepage": "https://github.com/saumyapandey31/Landmarked#readme",
   "devDependencies": {
     "concurrently": "^10.0.3"
+  },
+  "dependencies": {
+    "streamifier": "^0.1.1"
   }
 }
