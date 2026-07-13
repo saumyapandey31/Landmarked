@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import * as Cesium from 'cesium';
 import { reverseGeocode } from '../utils/geocode';
 
-if (import.meta.env.VITE_CESIUM_ION_TOKEN) {
-  Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN;
+const ION_TOKEN = import.meta.env.VITE_CESIUM_ION_TOKEN;
+if (ION_TOKEN) {
+  Cesium.Ion.defaultAccessToken = ION_TOKEN;
+} else {
+  console.warn('[InteractiveGlobe] No VITE_CESIUM_ION_TOKEN set — falling back to Esri imagery + ellipsoid terrain.');
 }
 
 const MARKER_COLORS = {
@@ -15,21 +18,11 @@ const MARKER_COLORS = {
 
 const IDLE_TIMEOUT_MS = 6000;
 
-// Cesium World Imagery (and its Ion fallback, Esri World Imagery) is pure
-// satellite pixels — no place names, no borders. A Google-Earth-like feel
-// comes from layering a labels-only basemap on top. CARTO's "*_only_labels"
-// raster tiles are free, keyless, and ship country/state/city/ocean/river/
-// mountain labels plus admin borders, pre-generalized per zoom level (so
-// labels thin out and never overlap — the tile provider does the LOD work
-// for us). A separate OSM raster layer supplies road + airport detail,
-// gated to close-in zooms only so it costs nothing when zoomed out.
 const LABELS_TILE_URL = (theme) =>
   `https://{s}.basemaps.cartocdn.com/rastertiles/${theme === 'dark' ? 'dark_only_labels' : 'light_only_labels'}/{z}/{x}/{y}{r}.png`;
 
 const ROADS_TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 
-// Camera-height band (meters) over which the roads/airports overlay eases
-// in and out, so it never just "pops" — it fades smoothly with altitude.
 const ROADS_FADE_START_M = 300000;
 const ROADS_FADE_END_M = 60000;
 
@@ -41,10 +34,12 @@ export default function InteractiveGlobe({ markers = [], onMapClick, onMarkerCli
   const labelsLayerRef = useRef(null);
   const roadsLayerRef = useRef(null);
   const placeToastTimerRef = useRef(null);
+  const entityMapRef = useRef(new Map());
   const [searchQuery, setSearchQuery] = useState('');
   const [nightMode, setNightMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [placeToast, setPlaceToast] = useState(null); // { label, loading }
+  const [loadError, setLoadError] = useState(null);
+  const [placeToast, setPlaceToast] = useState(null);
 
   useEffect(() => {
     if (!containerRef.current || viewerRef.current) return;
@@ -52,10 +47,6 @@ export default function InteractiveGlobe({ markers = [], onMapClick, onMarkerCli
     const viewer = new Cesium.Viewer(containerRef.current, {
       timeline: false,
       animation: false,
-      // We build the imagery stack ourselves (satellite + labels + roads),
-      // so skip Cesium's automatic default base layer and the picker UI
-      // for it — otherwise we'd end up with a duplicate base layer and a
-      // picker that only controls one of three stacked layers.
       baseLayer: false,
       baseLayerPicker: false,
       geocoder: true,
@@ -66,8 +57,6 @@ export default function InteractiveGlobe({ markers = [], onMapClick, onMarkerCli
       infoBox: false,
     });
 
-    // cinematic look: atmosphere, lighting, fog — makes the globe feel alive
-    // instead of a flat static map.
     viewer.scene.globe.enableLighting = true;
     viewer.scene.globe.showGroundAtmosphere = true;
     viewer.scene.skyAtmosphere.show = true;
@@ -75,28 +64,41 @@ export default function InteractiveGlobe({ markers = [], onMapClick, onMarkerCli
     viewer.scene.skyAtmosphere.saturationShift = 0.1;
     viewer.scene.fog.enabled = true;
     viewer.scene.fog.density = 0.0002;
-
-    // Performance: keep the globe smooth even with three imagery layers
-    // stacked (satellite + labels + roads) by capping tile screen-space
-    // error and giving Cesium a healthy tile cache instead of thrashing it.
+    viewer.scene.globe.depthTestAgainstTerrain = true;
     viewer.scene.globe.maximumScreenSpaceError = 2;
     viewer.scene.globe.tileCacheSize = 100;
     viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#0b1a17');
 
     let cancelled = false;
+
+    async function setupTerrain() {
+      try {
+        if (ION_TOKEN) {
+          viewer.terrainProvider = await Cesium.createWorldTerrainAsync({
+            requestWaterMask: true,
+            requestVertexNormals: true,
+          });
+        } else {
+          viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+        }
+      } catch (err) {
+        console.error('[InteractiveGlobe] Terrain load failed, using ellipsoid:', err);
+        if (!cancelled) viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+      }
+    }
+
     async function setupImagery(theme) {
-      // Base layer: real satellite pixels. Prefer Cesium World Imagery via
-      // Ion (best quality) and gracefully fall back to Esri World Imagery
-      // (no key required) if no Ion token is configured, so the globe never
-      // ships blank.
       let baseProvider = null;
-      if (Cesium.Ion.defaultAccessToken) {
+
+      if (ION_TOKEN) {
         try {
           baseProvider = await Cesium.IonImageryProvider.fromAssetId(2);
-        } catch {
+        } catch (err) {
+          console.error('[InteractiveGlobe] Ion imagery failed, falling back to Esri:', err);
           baseProvider = null;
         }
       }
+
       if (!baseProvider) {
         baseProvider = new Cesium.UrlTemplateImageryProvider({
           url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -105,13 +107,15 @@ export default function InteractiveGlobe({ markers = [], onMapClick, onMarkerCli
         });
       }
       if (cancelled) return;
+
       viewer.imageryLayers.addImageryProvider(baseProvider);
 
-      // Labels overlay: countries, states/provinces, capitals & cities,
-      // oceans/seas, rivers & lakes, mountain ranges, admin borders and
-      // coastlines — all on a transparent background so satellite pixels
-      // stay visible underneath. Text ships with a built-in halo so it
-      // stays readable over bright or dark imagery in either theme.
+      baseProvider.errorEvent?.addEventListener((err) => {
+        console.error('[InteractiveGlobe] Base imagery tile error:', err);
+        setLoadError('Map imagery failed to load — check your network/ad-blocker and try again.');
+      });
+
+      if (cancelled) return;
       const labelsLayer = viewer.imageryLayers.addImageryProvider(
         new Cesium.UrlTemplateImageryProvider({
           url: LABELS_TILE_URL(theme),
@@ -122,39 +126,40 @@ export default function InteractiveGlobe({ markers = [], onMapClick, onMarkerCli
       );
       labelsLayerRef.current = labelsLayer;
 
-      // Roads/airport overlay: only meaningful once zoomed in, so give it a
-      // minimumLevel — Cesium simply won't request tiles for zoomed-out
-      // views, which is what keeps this layer free performance-wise until
-      // the user actually needs it. Visibility/alpha is then eased smoothly
-      // by the LOD listener below instead of popping on/off.
+      if (cancelled) return;
+      // NOTE: no `minimumLevel` here. Setting minimumLevel on an imagery
+      // layer while a real terrain provider is active triggers a known
+      // Cesium bug — Imagery.getImageryFromCache recurses through tile
+      // ancestors looking for a placeholder and never terminates, which
+      // eventually throws "RangeError: Too many properties to enumerate"
+      // and crashes the whole render loop. Visibility for this layer is
+      // controlled entirely by `show`/`alpha` in updateLOD() below, which
+      // achieves the same "don't load roads when zoomed out" goal safely
+      // (show = false means Cesium requests zero tiles for this layer).
       const roadsLayer = viewer.imageryLayers.addImageryProvider(
         new Cesium.UrlTemplateImageryProvider({
           url: ROADS_TILE_URL,
           subdomains: ['a', 'b', 'c'],
           credit: '© OpenStreetMap contributors',
           maximumLevel: 19,
-          minimumLevel: 12,
         })
       );
       roadsLayer.alpha = 0;
       roadsLayer.show = false;
       roadsLayerRef.current = roadsLayer;
     }
-    setupImagery(nightMode ? 'dark' : 'light');
 
-    // Smoothly fade the roads/airport layer in as the camera descends, and
-    // fully disable it (no tile requests) once far away — this is the
-    // "labels/detail appear and disappear by zoom level" behavior applied
-    // to raster overlays, plus a performance win when zoomed out.
+    Promise.all([setupTerrain(), setupImagery(nightMode ? 'dark' : 'light')]);
+
     function updateLOD() {
       const layer = roadsLayerRef.current;
       if (!layer) return;
       const height = viewer.camera.positionCartographic?.height ?? Infinity;
       if (height > ROADS_FADE_START_M) {
-        if (layer.show) layer.show = false;
+        layer.show = false; // no tile requests fire while show=false
         return;
       }
-      if (!layer.show) layer.show = true;
+      layer.show = true;
       const t = Cesium.Math.clamp(
         (ROADS_FADE_START_M - height) / (ROADS_FADE_START_M - ROADS_FADE_END_M),
         0,
@@ -164,7 +169,6 @@ export default function InteractiveGlobe({ markers = [], onMapClick, onMarkerCli
     }
     const lodListener = viewer.scene.postRender.addEventListener(updateLOD);
 
-    // cinematic intro: start far out in space, then fly in
     viewer.camera.setView({
       destination: Cesium.Cartesian3.fromDegrees(78, 22, 40000000),
     });
@@ -188,16 +192,25 @@ export default function InteractiveGlobe({ markers = [], onMapClick, onMarkerCli
     canvas.addEventListener('pointerdown', markInteraction);
     canvas.addEventListener('wheel', markInteraction);
 
-    // idle auto-rotate — gives the globe a "playing video" feel when untouched
     const rotateListener = viewer.clock.onTick.addEventListener(() => {
       if (autoRotateRef.current) {
         viewer.scene.camera.rotate(Cesium.Cartesian3.UNIT_Z, -0.0006);
       }
     });
 
+    // Single click handler: pick first, branch to marker click or map
+    // click. Prevents a marker click from also firing the map-click
+    // (create journal entry) flow.
     const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
     handler.setInputAction((movement) => {
       markInteraction();
+
+      const picked = viewer.scene.pick(movement.position);
+      if (Cesium.defined(picked) && picked.id?.landmarkData) {
+        onMarkerClick?.(picked.id.landmarkData);
+        return;
+      }
+
       const cartesian = viewer.camera.pickEllipsoid(movement.position, viewer.scene.globe.ellipsoid);
       if (cartesian) {
         const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
@@ -205,9 +218,6 @@ export default function InteractiveGlobe({ markers = [], onMapClick, onMarkerCli
         const lon = Cesium.Math.toDegrees(cartographic.longitude);
         onMapClick?.({ lat, lon });
 
-        // Clicking a country/city surfaces its name as a small toast — the
-        // same click still opens the existing create-journal flow via
-        // onMapClick above, so this is purely additive context.
         clearTimeout(placeToastTimerRef.current);
         setPlaceToast({ label: 'Locating…', loading: true });
         reverseGeocode(lat, lon).then((place) => {
@@ -234,17 +244,12 @@ export default function InteractiveGlobe({ markers = [], onMapClick, onMarkerCli
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // sync markers into the scene, with a drop-in animation via scale
+  // Diffed marker sync: update existing entities in place, add new ones,
+  // remove stale ones. Avoids removeAll()+rebuild flicker on every render.
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer) return;
 
-    viewer.entities.removeAll();
-
-    // Journey markers use the same collision-avoidance philosophy as the
-    // place-name layer: instead of letting dense clusters of pins overlap
-    // each other, group nearby ones into a single badge with a count once
-    // the camera is far enough that they'd otherwise collide.
     const clustering = viewer.dataSourceDisplay?.defaultDataSource?.clustering;
     if (clustering && !clustering._landmarkedConfigured) {
       clustering.enabled = true;
@@ -265,8 +270,24 @@ export default function InteractiveGlobe({ markers = [], onMapClick, onMarkerCli
       clustering._landmarkedConfigured = true;
     }
 
+    const seen = new Set();
+    const entityMap = entityMapRef.current;
+
     markers.forEach((marker) => {
+      const id = marker.id ?? `${marker.latitude},${marker.longitude},${marker.label}`;
+      seen.add(id);
+      const existing = entityMap.get(id);
+
+      if (existing) {
+        existing.position = Cesium.Cartesian3.fromDegrees(marker.longitude, marker.latitude);
+        existing.point.color = MARKER_COLORS[marker.type] || Cesium.Color.WHITE;
+        existing.label.text = marker.label || '';
+        existing.landmarkData = marker;
+        return;
+      }
+
       const entity = viewer.entities.add({
+        id,
         position: Cesium.Cartesian3.fromDegrees(marker.longitude, marker.latitude),
         point: {
           pixelSize: 14,
@@ -290,17 +311,15 @@ export default function InteractiveGlobe({ markers = [], onMapClick, onMarkerCli
         },
       });
       entity.landmarkData = marker;
+      entityMap.set(id, entity);
     });
 
-    const clickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
-    clickHandler.setInputAction((movement) => {
-      const picked = viewer.scene.pick(movement.position);
-      if (Cesium.defined(picked) && picked.id?.landmarkData) {
-        onMarkerClick?.(picked.id.landmarkData);
+    for (const [id, entity] of entityMap) {
+      if (!seen.has(id)) {
+        viewer.entities.remove(entity);
+        entityMap.delete(id);
       }
-    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
-
-    return () => clickHandler.destroy();
+    }
   }, [markers, onMarkerClick]);
 
   function toggleNightMode() {
@@ -310,10 +329,6 @@ export default function InteractiveGlobe({ markers = [], onMapClick, onMarkerCli
       const next = !prev;
       viewer.scene.globe.enableLighting = next;
 
-      // Swap the labels overlay for the dark/light variant so text keeps
-      // reading cleanly against the sun-lit vs. night-lit globe. Imagery
-      // providers are immutable once created, so we rebuild the layer
-      // in-place rather than mutating it.
       const oldLabels = labelsLayerRef.current;
       if (oldLabels) {
         const index = viewer.imageryLayers.indexOf(oldLabels);
@@ -329,7 +344,6 @@ export default function InteractiveGlobe({ markers = [], onMapClick, onMarkerCli
         viewer.imageryLayers.add(newLabels, index);
         labelsLayerRef.current = newLabels;
       }
-
       return next;
     });
   }
@@ -364,11 +378,22 @@ export default function InteractiveGlobe({ markers = [], onMapClick, onMarkerCli
     <div className="relative w-full h-full rounded-xl2 overflow-hidden shadow-soft globe-frame">
       <div ref={containerRef} className="w-full h-full" />
 
-      {isLoading && (
+      {isLoading && !loadError && (
         <div className="absolute inset-0 flex items-center justify-center bg-accent-primary">
           <p className="text-white font-display text-lg tracking-wide animate-pulse">
             Descending to Earth…
           </p>
+        </div>
+      )}
+
+      {loadError && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/70 z-10">
+          <div className="text-white text-sm text-center max-w-xs px-4">
+            <p className="mb-2">{loadError}</p>
+            <button onClick={() => window.location.reload()} className="underline text-sage">
+              Reload
+            </button>
+          </div>
         </div>
       )}
 
@@ -386,7 +411,17 @@ export default function InteractiveGlobe({ markers = [], onMapClick, onMarkerCli
           Go
         </button>
       </form>
-   {placeToast && (
+
+      <button
+        type="button"
+        onClick={toggleNightMode}
+        className="absolute top-4 right-4 glass-dark rounded-full p-2 shadow-card text-white text-sm"
+        aria-label="Toggle night mode"
+      >
+        {nightMode ? '☀️' : '🌙'}
+      </button>
+
+      {placeToast && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 glass-dark rounded-full px-4 py-2 shadow-card text-sm font-medium text-white pointer-events-none animate-fade-in">
           {placeToast.loading ? placeToast.label : `📍 ${placeToast.label}`}
         </div>
